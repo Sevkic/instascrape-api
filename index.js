@@ -3,16 +3,34 @@ const puppeteer = require('puppeteer');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const crypto = require('crypto');
+// LemonSqueezy integration (replace Stripe)
+const { MockPaymentSystem } = require('./public/lemonsqueezy');
+const { CreditManager } = require('./credit-system');
+const { EnhancedScraper } = require('./enhanced-scraper');
+const { BlacklistManager } = require('./blacklist-manager');
+const { TERMS_OF_SERVICE, generateComplianceReport } = require('./legal-tos');
+const { AbuseProtectionSystem } = require('./abuse-protection');
+
+const mockPayments = new MockPaymentSystem();
+const creditManager = new CreditManager();
+const enhancedScraper = new EnhancedScraper();
+const blacklistManager = new BlacklistManager();
+const abuseProtection = new AbuseProtectionSystem();
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Security & Rate Limiting
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false, // Allow inline styles for frontend
+}));
 app.use(cors());
 app.use(express.json());
+
+// Serve static files
+app.use(express.static('public'));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -20,14 +38,27 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Blacklisted domains (add more as needed)
-const BLACKLISTED_DOMAINS = [
-  'facebook.com',
-  'instagram.com', 
-  'twitter.com',
-  'linkedin.com',
-  'google.com'
+// Restricted domains - sites with strict ToS or anti-scraping measures
+const RESTRICTED_DOMAINS = [
+  'facebook.com',    // Strict anti-scraping, login required
+  'instagram.com',   // API-only access, strong anti-bot
+  'twitter.com',     // Rate limits, API required
+  'linkedin.com',    // Professional network, privacy concerns  
+  'google.com',      // Search results, constantly changing
+  'amazon.com',      // Anti-scraping measures, dynamic content
+  'youtube.com',     // API required, video content
+  'tiktok.com',      // Mobile-first, heavily protected
+  'pinterest.com',   // Image-heavy, requires auth
+  'reddit.com'       // Rate limits, community guidelines
 ];
+
+// Legal compliance requirements
+const COMPLIANCE_RULES = {
+  respectRobotsTxt: true,
+  maxRequestRate: 1, // 1 request per second
+  requiresUserConsent: true,
+  publicDataOnly: true
+};
 
 // Pricing tiers
 const PRICING = {
@@ -36,16 +67,27 @@ const PRICING = {
   custom: 5000 // €50.00 in cents
 };
 
-// Helper function to validate URL
+// Enhanced URL validation using BlacklistManager
+async function validateUrlEnhanced(url) {
+  try {
+    return await blacklistManager.validateUrl(url);
+  } catch (error) {
+    return { valid: false, reason: 'Validation error: ' + error.message };
+  }
+}
+
+// Legacy validation for backward compatibility
 function isValidUrl(url) {
   try {
     const urlObj = new URL(url);
     const domain = urlObj.hostname.toLowerCase();
     
-    // Check if domain is blacklisted
-    return !BLACKLISTED_DOMAINS.some(blocked => 
-      domain.includes(blocked)
+    // Check if domain is restricted
+    const isRestricted = RESTRICTED_DOMAINS.some(restricted => 
+      domain.includes(restricted) || domain === restricted
     );
+    
+    return !isRestricted;
   } catch {
     return false;
   }
@@ -122,11 +164,11 @@ async function scrapeWebsite(url, options = {}) {
   }
 }
 
-// Payment verification
-async function verifyPayment(paymentIntentId) {
+// Payment verification (LemonSqueezy/Mock)
+async function verifyPayment(paymentId) {
   try {
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    return paymentIntent.status === 'succeeded';
+    // For demo: use mock payment system
+    return mockPayments.verifyPayment(paymentId);
   } catch (error) {
     return false;
   }
@@ -134,67 +176,96 @@ async function verifyPayment(paymentIntentId) {
 
 // Routes
 
-// Landing page
-app.get('/', (req, res) => {
-  res.send(`
-    <html>
-      <head>
-        <title>InstaScrape API</title>
-        <style>
-          body { font-family: monospace; background: #000; color: #00ff41; padding: 20px; }
-          .container { max-width: 800px; margin: 0 auto; }
-          .price { background: #001100; padding: 10px; margin: 10px 0; border: 1px solid #00ff41; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>🚀 InstaScrape API</h1>
-          <p>Instant web scraping API - Get any website data in seconds!</p>
-          
-          <h2>📋 Pricing</h2>
-          <div class="price">
-            <strong>Basic Scrape - €5</strong><br>
-            Extract title, description, headers, basic links
-          </div>
-          <div class="price">
-            <strong>Premium Scrape - €20</strong><br>
-            Custom selectors, full HTML, text extraction
-          </div>
-          <div class="price">
-            <strong>Custom Scrape - €50</strong><br>
-            Advanced options, wait conditions, complex data
-          </div>
-          
-          <h2>🔧 API Documentation</h2>
-          <pre>
-POST /scrape
-{
-  "url": "https://example.com",
-  "paymentId": "pi_xxx...",
-  "tier": "basic|premium|custom",
-  "options": {
-    "selector": "h1, p",
-    "type": "text|html",
-    "waitFor": ".content"
-  }
-}
-          </pre>
-          
-          <h2>💳 How to Pay</h2>
-          <p>1. Create payment intent via Stripe</p>
-          <p>2. Use payment ID in API call</p>
-          <p>3. Get instant results!</p>
-          
-          <h2>⚖️ Legal Notice</h2>
-          <p>Users must respect target website's robots.txt and Terms of Service.</p>
-        </div>
-      </body>
-    </html>
-  `);
+// API root - redirect to frontend
+app.get('/api', (req, res) => {
+  res.json({
+    name: 'InstaScrape API',
+    version: '1.0.0',
+    endpoints: {
+      scrape: 'POST /api/scrape',
+      payment: 'POST /api/create-payment',
+      health: 'GET /api/health'
+    }
+  });
 });
 
-// Main scraping endpoint
+// Enhanced scraping endpoint with credit system
 app.post('/scrape', async (req, res) => {
+  const { url, accessToken, tier = 'basic', options = {} } = req.body;
+  
+  // Validate input
+  if (!url || !accessToken) {
+    return res.status(400).json({
+      error: 'Missing required fields: url, accessToken'
+    });
+  }
+  
+  if (!isValidUrl(url)) {
+    return res.status(400).json({
+      error: 'Invalid URL or restricted domain',
+      details: 'This domain is restricted due to Terms of Service or anti-scraping measures',
+      restrictedDomains: RESTRICTED_DOMAINS
+    });
+  }
+  
+  // Validate and consume credits
+  const creditCheck = creditManager.validateAndConsumeCredit(accessToken, tier);
+  if (!creditCheck.valid) {
+    return res.status(402).json({
+      error: creditCheck.error,
+      available: creditCheck.available,
+      needed: creditCheck.needed
+    });
+  }
+  
+  // Perform enhanced scraping
+  console.log(`Enhanced scraping ${url} with token ${accessToken} (${creditCheck.remainingCredits} credits left)`);
+  
+  try {
+    const result = await enhancedScraper.scrapeEnhanced(url, options);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        url: url,
+        data: result.data,
+        metadata: result.metadata,
+        credits: {
+          remaining: creditCheck.remainingCredits,
+          tier: creditCheck.tier
+        },
+        scrapedAt: new Date().toISOString()
+      });
+    } else {
+      // Refund credit on failure
+      const token = creditManager.tokens.get(accessToken);
+      if (token) {
+        token.usedCredits -= creditManager.credits[tier] || 1;
+      }
+      
+      res.status(500).json({
+        error: 'Scraping failed',
+        details: result.error,
+        creditRefunded: true
+      });
+    }
+  } catch (error) {
+    // Refund credit on server error
+    const token = creditManager.tokens.get(accessToken);
+    if (token) {
+      token.usedCredits -= creditManager.credits[tier] || 1;
+    }
+    
+    res.status(500).json({
+      error: 'Server error during scraping',
+      details: error.message,
+      creditRefunded: true
+    });
+  }
+});
+
+// Legacy endpoint for backward compatibility (paymentId)
+app.post('/scrape-legacy', async (req, res) => {
   const { url, paymentId, tier = 'basic', options = {} } = req.body;
   
   // Validate input
@@ -206,11 +277,13 @@ app.post('/scrape', async (req, res) => {
   
   if (!isValidUrl(url)) {
     return res.status(400).json({
-      error: 'Invalid or blacklisted URL'
+      error: 'Invalid URL or restricted domain',
+      details: 'This domain is restricted due to Terms of Service or anti-scraping measures',
+      restrictedDomains: RESTRICTED_DOMAINS
     });
   }
   
-  // Verify payment
+  // Verify payment (old system)
   const paymentValid = await verifyPayment(paymentId);
   if (!paymentValid) {
     return res.status(402).json({
@@ -218,8 +291,8 @@ app.post('/scrape', async (req, res) => {
     });
   }
   
-  // Perform scraping
-  console.log(`Scraping ${url} for payment ${paymentId}`);
+  // Perform basic scraping
+  console.log(`Legacy scraping ${url} for payment ${paymentId}`);
   const result = await scrapeWebsite(url, options);
   
   if (result.success) {
@@ -227,7 +300,8 @@ app.post('/scrape', async (req, res) => {
       success: true,
       url: url,
       data: result.data,
-      scrapedAt: new Date().toISOString()
+      scrapedAt: new Date().toISOString(),
+      note: 'Legacy endpoint - upgrade to token-based system for enhanced features'
     });
   } else {
     res.status(500).json({
@@ -237,7 +311,7 @@ app.post('/scrape', async (req, res) => {
   }
 });
 
-// Create payment intent
+// Create payment (LemonSqueezy/Mock) with credit system
 app.post('/create-payment', async (req, res) => {
   const { tier = 'basic' } = req.body;
   
@@ -246,24 +320,287 @@ app.post('/create-payment', async (req, res) => {
   }
   
   try {
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: PRICING[tier],
-      currency: 'eur',
-      metadata: { tier }
-    });
+    // For demo: use mock payment system
+    const payment = mockPayments.createPayment(tier);
+    
+    // Generate access token after payment
+    setTimeout(() => {
+      const tokenData = creditManager.generateAccessToken({
+        paymentId: payment.paymentId,
+        tier: tier
+      });
+      console.log(`Access token generated: ${tokenData.accessToken} (${tokenData.credits} credits)`);
+    }, 3000); // Simulate payment processing time
     
     res.json({
-      clientSecret: paymentIntent.client_secret,
-      paymentId: paymentIntent.id
+      paymentId: payment.paymentId,
+      checkoutUrl: payment.checkoutUrl,
+      amount: payment.amount,
+      tier: tier,
+      message: 'Payment processing... Access token will be generated upon completion.'
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+// Get access token after payment
+app.get('/access-token/:paymentId', (req, res) => {
+  const { paymentId } = req.params;
+  
+  // Find token by payment ID
+  const tokens = Array.from(creditManager.tokens.values());
+  const token = tokens.find(t => t.paymentId === paymentId);
+  
+  if (!token) {
+    return res.status(404).json({ error: 'Payment not found or still processing' });
+  }
+  
+  res.json({
+    accessToken: token.id,
+    credits: token.credits - token.usedCredits,
+    tier: token.tier,
+    expiresAt: token.expiresAt
+  });
+});
+
+// Terms of Service acceptance
+app.post('/accept-terms', (req, res) => {
+  const { accepted, userIP, userAgent, timestamp } = req.body;
+  
+  if (!accepted) {
+    return res.status(400).json({ 
+      error: 'Terms of Service must be accepted to use this API' 
+    });
+  }
+  
+  // Log acceptance (in production, store in database)
+  const acceptanceRecord = {
+    userIP: req.ip || userIP,
+    userAgent: req.get('User-Agent') || userAgent,
+    acceptedAt: new Date().toISOString(),
+    timestamp: timestamp
+  };
+  
+  console.log('ToS Acceptance:', acceptanceRecord);
+  
+  res.json({ 
+    success: true, 
+    message: 'Terms of Service accepted',
+    acceptanceId: crypto.randomBytes(8).toString('hex')
+  });
+});
+
+// Get Complete Terms of Service
+app.get('/terms', (req, res) => {
+  res.json({
+    termsOfService: TERMS_OF_SERVICE,
+    blacklistStats: blacklistManager.getStats(),
+    legalNotice: "By using this API, you agree to our complete Terms of Service and acknowledge full legal responsibility for your use."
+  });
+});
+
+// Get full legal document (HTML formatted)
+app.get('/legal', (req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.send(TERMS_OF_SERVICE.terms);
+});
+
+// Privacy Policy endpoint
+app.get('/privacy', (req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.send(TERMS_OF_SERVICE.privacyPolicy);
+});
+
+// Check credit balance
+app.get('/credits/:accessToken', (req, res) => {
+  const { accessToken } = req.params;
+  const tokenInfo = creditManager.getTokenInfo(accessToken);
+  
+  if (!tokenInfo) {
+    return res.status(404).json({ error: 'Invalid access token' });
+  }
+  
+  res.json(tokenInfo);
+});
+
+// PROTECTED TEST endpoint with full legal compliance
+app.post('/test-scrape', async (req, res) => {
+  const startTime = Date.now();
+  const clientIP = req.ip || req.connection.remoteAddress;
+  
+  try {
+    // 1. Check if IP is banned or suspicious
+    const ipStatus = abuseProtection.checkIPStatus(clientIP);
+    if (ipStatus.status === 'banned') {
+      return res.status(403).json({ 
+        error: 'Access denied', 
+        reason: ipStatus.reason,
+        appeal: 'Contact support if you believe this is an error'
+      });
+    }
+
+    // 2. Rate limiting check
+    const { url, options = {} } = req.body;
+    const domain = url ? abuseProtection.extractDomain(url) : null;
+    const rateLimitResult = abuseProtection.checkRateLimit(clientIP, domain);
+    
+    if (!rateLimitResult.allowed) {
+      abuseProtection.recordFailure(clientIP, 'Rate limit exceeded');
+      return res.status(429).json({
+        error: 'Rate limit exceeded',
+        details: rateLimitResult.reason,
+        resetTime: rateLimitResult.resetTime,
+        limits: 'Max 100 requests per hour per IP'
+      });
+    }
+
+    // 3. Validate URL input
+    if (!url) {
+      abuseProtection.recordFailure(clientIP, 'Missing URL');
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    // 4. Enhanced URL validation with blacklist and robots.txt
+    console.log(`🔍 Validating URL: ${url} from IP: ${clientIP}`);
+    const validation = await validateUrlEnhanced(url);
+    
+    if (!validation.valid) {
+      abuseProtection.recordFailure(clientIP, validation.reason);
+      
+      // Generate legal compliance report
+      const complianceReport = generateComplianceReport(url, validation);
+      
+      return res.status(400).json({
+        error: 'URL validation failed',
+        reason: validation.reason,
+        legalCompliance: complianceReport,
+        appeal: 'This URL is blocked for legal protection. See /legal for full terms.',
+        documentation: '/terms'
+      });
+    }
+
+    // 5. Log successful validation
+    console.log(`✅ FREE TEST: Scraping ${url} from ${clientIP}`);
+    abuseProtection.recordRequest(clientIP, domain);
+
+    // 6. Perform enhanced scraping
+    const result = await enhancedScraper.scrapeEnhanced(url, options);
+    const processingTime = Date.now() - startTime;
+
+    // 7. Log request with full details
+    await abuseProtection.logRequest(req, {
+      success: result.success,
+      error: result.success ? null : result.error,
+      processingTime: processingTime,
+      dataSize: result.success ? JSON.stringify(result.data).length : 0
+    });
+
+    // 8. Send enhanced response with legal compliance info
+    if (result.success) {
+      const complianceReport = generateComplianceReport(url, validation);
+      
+      res.json({
+        success: true,
+        url: url,
+        data: result.data,
+        metadata: {
+          ...result.metadata,
+          processingTime: processingTime,
+          legalCompliance: complianceReport
+        },
+        legalNotice: 'User is solely responsible for compliance with target website ToS and applicable laws',
+        scrapedAt: new Date().toISOString(),
+        mode: 'FREE_TEST'
+      });
+    } else {
+      abuseProtection.recordFailure(clientIP, 'Scraping failed');
+      res.status(500).json({
+        error: 'Scraping failed',
+        details: result.error,
+        url: url,
+        legalNotice: 'Scraping failure may indicate target website restrictions'
+      });
+    }
+
+  } catch (error) {
+    abuseProtection.recordFailure(clientIP, 'Server error');
+    await abuseProtection.logRequest(req, {
+      success: false,
+      error: error.message,
+      processingTime: Date.now() - startTime
+    });
+
+    res.status(500).json({
+      error: 'Internal server error',
+      details: 'Please try again later',
+      requestId: `req_${Date.now()}`
+    });
+  }
+});
+
+// Admin stats endpoint with comprehensive monitoring
+app.get('/admin/stats', (req, res) => {
+  const stats = {
+    credits: creditManager.getStats(),
+    abuse: abuseProtection.getStats(),
+    blacklist: blacklistManager.getStats(),
+    system: {
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage(),
+      nodeVersion: process.version,
+      timestamp: new Date().toISOString()
+    }
+  };
+  
+  res.json(stats);
+});
+
+// Admin abuse reports
+app.get('/admin/abuse', async (req, res) => {
+  const limit = parseInt(req.query.limit) || 50;
+  const reports = await abuseProtection.getRecentAbuse(limit);
+  
+  res.json({
+    reports,
+    summary: {
+      total: reports.length,
+      highSeverity: reports.filter(r => r.severity === 'HIGH').length,
+      mediumSeverity: reports.filter(r => r.severity === 'MEDIUM').length,
+      lowSeverity: reports.filter(r => r.severity === 'LOW').length
+    }
+  });
+});
+
+// Admin manual IP management
+app.post('/admin/ban-ip', (req, res) => {
+  const { ip, reason } = req.body;
+  if (!ip || !reason) {
+    return res.status(400).json({ error: 'IP and reason required' });
+  }
+  
+  abuseProtection.banIP(ip, reason);
+  res.json({ success: true, message: `Banned IP: ${ip}` });
+});
+
+app.post('/admin/unban-ip', (req, res) => {
+  const { ip } = req.body;
+  if (!ip) {
+    return res.status(400).json({ error: 'IP required' });
+  }
+  
+  abuseProtection.unbanIP(ip);
+  res.json({ success: true, message: `Unbanned IP: ${ip}` });
+});
+
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    version: '2.0.0',
+    features: ['enhanced-scraping', 'credit-system', 'robots-txt-compliance']
+  });
 });
 
 app.listen(PORT, () => {

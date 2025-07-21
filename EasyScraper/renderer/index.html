@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyScraper v1.0</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="title">
+                <span class="icon">🕷️</span>
+                <h1>EasyScraper</h1>
+                <span class="version">v1.0</span>
+            </div>
+            <div class="license-status" id="licenseStatus">
+                <span id="licenseText">Free Tier</span>
+                <button id="licenseBtn" class="btn-small">Upgrade</button>
+            </div>
+        </header>
+
+        <!-- Main Form -->
+        <div class="main-form">
+            <!-- URL Input -->
+            <div class="form-group">
+                <label for="urlInput">🔗 Website URL to scrape:</label>
+                <input type="url" id="urlInput" placeholder="https://example.com" required>
+                <button id="validateBtn" class="btn-small">Validate</button>
+            </div>
+
+            <!-- Data Type Selection -->
+            <div class="form-group">
+                <label>📄 What to scrape:</label>
+                <div class="checkbox-grid">
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="dataType" value="titles" checked>
+                        <span>📝 Titles</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="dataType" value="prices">
+                        <span>💰 Prices</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="dataType" value="images">
+                        <span>🖼️ Images</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="dataType" value="descriptions">
+                        <span>📖 Descriptions</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="dataType" value="links">
+                        <span>🔗 Links</span>
+                    </label>
+                    <label class="checkbox-item">
+                        <input type="checkbox" name="dataType" value="dates">
+                        <span>📅 Dates</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Custom Selectors (Advanced) -->
+            <div class="form-group advanced" id="customSelectors" style="display: none;">
+                <label>🎯 Custom CSS Selectors (Advanced):</label>
+                <div class="selector-inputs">
+                    <input type="text" id="titleSelector" placeholder="Titles selector (e.g., .product-title)">
+                    <input type="text" id="priceSelector" placeholder="Prices selector (e.g., .price)">
+                    <input type="text" id="imageSelector" placeholder="Images selector (e.g., .product-img)">
+                </div>
+                <small>Leave empty to use smart auto-detection</small>
+            </div>
+
+            <!-- Settings -->
+            <div class="settings-row">
+                <div class="form-group small">
+                    <label for="maxPages">🔁 Max pages:</label>
+                    <input type="number" id="maxPages" value="1" min="1" max="50">
+                </div>
+                <div class="form-group small">
+                    <label for="format">💾 Format:</label>
+                    <select id="format">
+                        <option value="csv">CSV</option>
+                        <option value="json" id="jsonOption">JSON</option>
+                    </select>
+                </div>
+                <div class="form-group small">
+                    <button id="advancedToggle" class="btn-small">⚙️ Advanced</button>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button id="scrapeBtn" class="btn-primary">
+                    <span id="scrapeBtnText">🚀 Start Scraping</span>
+                </button>
+                <button id="stopBtn" class="btn-secondary" style="display: none;">⏹️ Stop</button>
+            </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="progress-section" id="progressSection" style="display: none;">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">Preparing...</div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-section" id="resultsSection" style="display: none;">
+            <div class="results-header">
+                <h3>✅ Scraping Complete!</h3>
+                <div class="results-stats" id="resultsStats"></div>
+            </div>
+            <div class="results-actions">
+                <button id="saveBtn" class="btn-primary">💾 Save Results</button>
+                <button id="previewBtn" class="btn-secondary">👁️ Preview Data</button>
+                <button id="newScrapeBtn" class="btn-secondary">🔄 New Scrape</button>
+            </div>
+            <div class="results-preview" id="resultsPreview" style="display: none;"></div>
+        </div>
+
+        <!-- Usage Stats (Free Tier) -->
+        <div class="usage-stats" id="usageStats">
+            <div class="usage-text">
+                <span id="usageText">Free tier: 0/3 scrapes today</span>
+                <a href="#" id="upgradeLink">Upgrade for unlimited scraping</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- License Modal -->
+    <div class="modal" id="licenseModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔑 Activate License</h2>
+                <button class="close-btn" id="closeLicenseModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="license-plans">
+                    <div class="plan">
+                        <h3>🆓 Free</h3>
+                        <p>3 scrapes per day<br>CSV export only</p>
+                        <div class="price">$0</div>
+                    </div>
+                    <div class="plan popular">
+                        <h3>⭐ Pro</h3>
+                        <p>Unlimited scraping<br>CSV + JSON export<br>Advanced features</p>
+                        <div class="price">$9/month</div>
+                    </div>
+                    <div class="plan">
+                        <h3>💎 Lifetime</h3>
+                        <p>All Pro features<br>Lifetime access<br>Future updates</p>
+                        <div class="price">$29 once</div>
+                    </div>
+                </div>
+                <div class="license-input">
+                    <label for="licenseKey">Enter your license key:</label>
+                    <input type="text" id="licenseKey" placeholder="PRO-XXXX-XXXX-XXXX" autocomplete="off">
+                    <button id="validateLicenseBtn" class="btn-primary">Activate License</button>
+                </div>
+                <div class="license-demo">
+                    <p>Want to try Pro features? Use demo key: <code>DEMO-123-456</code></p>
+                </div>
+                <div class="license-result" id="licenseResult"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Terms Modal -->
+    <div class="modal" id="termsModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚖️ Terms of Use</h2>
+                <button class="close-btn" id="closeTermsModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="terms-content">
+                    <h3>Important Legal Notice</h3>
+                    <p><strong>You are responsible for ensuring your scraping activities comply with:</strong></p>
+                    <ul>
+                        <li>Target website's Terms of Service</li>
+                        <li>Robots.txt files and crawl policies</li>
+                        <li>Local and international copyright laws</li>
+                        <li>Data protection regulations (GDPR, CCPA)</li>
+                        <li>Rate limiting and respectful crawling practices</li>
+                    </ul>
+                    <p><strong>EasyScraper:</strong></p>
+                    <ul>
+                        <li>Provides technical tools only</li>
+                        <li>Does not endorse any particular use</li>
+                        <li>Is not liable for user's scraping activities</li>
+                        <li>Blocks known problematic domains</li>
+                    </ul>
+                    <p class="warning">⚠️ <strong>Use responsibly.</strong> Scraping can have legal implications. When in doubt, seek permission from the website owner.</p>
+                </div>
+                <div class="terms-actions">
+                    <label class="checkbox-item">
+                        <input type="checkbox" id="termsAccept">
+                        <span>I understand and accept these terms</span>
+                    </label>
+                    <button id="proceedBtn" class="btn-primary" disabled>Proceed</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
